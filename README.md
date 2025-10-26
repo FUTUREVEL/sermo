@@ -135,6 +135,3 @@ sermo/
 **Sermo** - *라틴어로 "대화"를 의미*
 
 OpenAI의 최신 실시간 AI 기술로 자연스러운 음성 대화를 경험해보세요! 🚀
-
-
-set OPENAI_API_KEY=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
