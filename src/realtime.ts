@@ -1,6 +1,5 @@
-import { RealtimeAgent, RealtimeSession } from '@openai/agents/realtime';
-
-let session: RealtimeSession | null = null;
+// OpenAI Realtime API uses WebSocket, not the agents library
+let websocket: WebSocket | null = null;
 let isConnected = false;
 let isMicrophoneOn = true;
 let isAISpeaking = false;
@@ -10,12 +9,21 @@ let audioContext: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
 let micTestActive = false;
 
+
+
 export async function setupRealtime() {
   const connectBtn = document.getElementById('connect-btn') as HTMLButtonElement;
   const micBtn = document.getElementById('mic-btn') as HTMLButtonElement;
   const micTestBtn = document.getElementById('mic-test-btn') as HTMLButtonElement;
   const retryBtn = document.getElementById('retry-btn') as HTMLButtonElement;
   const statusDiv = document.getElementById('status') as HTMLDivElement;
+  
+  // 대화창 요소들
+  const conversationContainer = document.getElementById('conversation-container') as HTMLDivElement;
+  const conversationMessages = document.getElementById('conversation-messages') as HTMLDivElement;
+  const clearConversationBtn = document.getElementById('clear-conversation') as HTMLButtonElement;
+  const userSpeakingIndicator = document.getElementById('user-speaking') as HTMLDivElement;
+  const aiSpeakingIndicator = document.getElementById('ai-speaking') as HTMLDivElement;
   
   // Mic popup elements
   const micPopup = document.getElementById('mic-popup') as HTMLDivElement;
@@ -28,6 +36,114 @@ export async function setupRealtime() {
   if (!connectBtn || !micBtn || !statusDiv) {
     console.error('Required elements not found');
     return;
+  }
+
+  // 대화 메시지를 추가하는 함수
+  function addMessageToConversation(sender: 'user' | 'ai', content: string) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${sender}`;
+    
+    const headerDiv = document.createElement('div');
+    headerDiv.className = 'message-header';
+    headerDiv.textContent = sender === 'user' ? '👤 사용자' : '🤖 AI Assistant';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = content;
+    
+    const timeDiv = document.createElement('div');
+    timeDiv.className = 'message-time';
+    timeDiv.textContent = new Date().toLocaleTimeString();
+    
+    messageDiv.appendChild(headerDiv);
+    messageDiv.appendChild(contentDiv);
+    messageDiv.appendChild(timeDiv);
+    
+    conversationMessages.appendChild(messageDiv);
+    
+    // 자동 스크롤을 위해 최신 메시지로 이동
+    messageDiv.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // 말하는 상태 표시를 업데이트하는 함수
+  function updateSpeakingStatus(speaker: 'user' | 'ai' | 'none') {
+    userSpeakingIndicator.classList.toggle('hidden', speaker !== 'user');
+    aiSpeakingIndicator.classList.toggle('hidden', speaker !== 'ai');
+  }
+
+  // Handle incoming messages from OpenAI Realtime API
+  function handleRealtimeMessage(message: any) {
+    console.log('Received message:', message);
+    
+    switch (message.type) {
+      case 'session.created':
+        console.log('Session created successfully');
+        addMessageToConversation('ai', '세션이 연결되었습니다. 말씀해 주세요!');
+        break;
+      case 'session.updated':
+        console.log('Session updated');
+        break;
+      case 'conversation.item.created':
+        console.log('Conversation item created:', message);
+        if (message.item && message.item.content) {
+          // 사용자의 음성을 텍스트로 변환된 것
+          if (message.item.role === 'user') {
+            const transcript = message.item.content[0]?.transcript || message.item.content[0]?.text;
+            if (transcript) {
+              addMessageToConversation('user', transcript);
+              updateSpeakingStatus('none');
+            }
+          }
+        }
+        break;
+      case 'response.audio.delta':
+        // Handle audio response from AI
+        if (message.delta) {
+          console.log('Received audio delta');
+          updateSpeakingStatus('ai');
+          // TODO: Play audio delta
+        }
+        break;
+      case 'response.text.delta':
+        // Handle text response from AI
+        if (message.delta) {
+          console.log('AI response:', message.delta);
+          // AI가 텍스트로 응답하는 경우
+          addMessageToConversation('ai', message.delta);
+          updateSpeakingStatus('ai');
+        }
+        break;
+      case 'response.done':
+        console.log('Response completed');
+        updateSpeakingStatus('none');
+        break;
+      case 'input_audio_buffer.speech_started':
+        console.log('User started speaking');
+        updateSpeakingStatus('user');
+        break;
+      case 'input_audio_buffer.speech_stopped':
+        console.log('User stopped speaking');
+        updateSpeakingStatus('none');
+        break;
+      case 'conversation.item.input_audio_transcription.completed':
+        // 사용자 음성의 전체 전사가 완료됨
+        if (message.transcript) {
+          addMessageToConversation('user', message.transcript);
+        }
+        break;
+      case 'response.output_item.added':
+        // AI 응답이 시작됨
+        if (message.item && message.item.content) {
+          updateSpeakingStatus('ai');
+        }
+        break;
+      case 'error':
+        console.error('OpenAI API error:', message);
+        addMessageToConversation('ai', `오류가 발생했습니다: ${message.error?.message || '알 수 없는 오류'}`);
+        break;
+      default:
+        console.log('Unknown message type:', message.type);
+    }
   }
 
   // Update status display
@@ -52,32 +168,75 @@ export async function setupRealtime() {
       try {
         updateStatus('Connecting...', true);
         
-        const agent = new RealtimeAgent({
-          name: 'Assistant',
-          instructions: 'You are a helpful, friendly assistant. Speak naturally and conversationally in Korean if the user speaks Korean.',
-        });
-        
-        session = new RealtimeSession(agent);
-        
         console.log('Attempting to connect to OpenAI Realtime API...');
-        console.log('Using ephemeral key:', 'ek_68fdcccb5d888191a4d855036da816f0');
         
-        // Add timeout and retry logic
-        const connectWithTimeout = async (timeoutMs: number = 10000) => {
+        // Get fresh ephemeral key from your backend or use environment variable
+        // TODO: Replace with valid ephemeral key from RealTimeGptTest.py
+        const apiKey = 'ek_68fdde1ffcf081918d8a183e563ffbb2'; // ⚠️ This key is expired - need new one
+        
+        // Create WebSocket connection to OpenAI Realtime API with proper authentication
+        const wsUrl = `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
+        
+        // Use WebSocket with proper headers via subprotocols for authentication
+        websocket = new WebSocket(wsUrl, [
+          'realtime',
+          `openai-beta.realtime-v1`,
+          `openai-insecure-api-key.${apiKey}`
+        ]);
+        
+        console.log('Using ephemeral key:', apiKey);
+        
+        // Add timeout for WebSocket connection
+        const connectWithTimeout = async (timeoutMs: number = 15000) => {
           return new Promise<void>((resolve, reject) => {
             const timeout = setTimeout(() => {
-              reject(new Error('Connection timeout after ' + timeoutMs + 'ms'));
+              reject(new Error('WebSocket connection timeout after ' + timeoutMs + 'ms'));
             }, timeoutMs);
             
-            session!.connect({
-              apiKey: 'ek_68fdcccb5d888191a4d855036da816f0'
-            }).then(() => {
+            websocket!.onopen = () => {
               clearTimeout(timeout);
+              console.log('WebSocket connection established');
+              
+              // Send session configuration (authentication already done via subprotocol)
+              websocket!.send(JSON.stringify({
+                type: 'session.update',
+                session: {
+                  modalities: ['text', 'audio'],
+                  instructions: 'You are a helpful, friendly assistant. Speak naturally and conversationally in Korean if the user speaks Korean.',
+                  voice: 'alloy',
+                  input_audio_format: 'pcm16',
+                  output_audio_format: 'pcm16',
+                  input_audio_transcription: {
+                    model: 'whisper-1'
+                  }
+                }
+              }));
+              
               resolve();
-            }).catch((error) => {
+            };
+            
+            websocket!.onerror = (error) => {
               clearTimeout(timeout);
-              reject(error);
-            });
+              console.error('WebSocket connection error:', error);
+              reject(new Error('WebSocket connection failed'));
+            };
+            
+            websocket!.onclose = (event) => {
+              clearTimeout(timeout);
+              console.log('WebSocket connection closed:', event.code, event.reason);
+              if (event.code !== 1000) { // Not a normal closure
+                reject(new Error(`WebSocket closed unexpectedly: ${event.reason || event.code}`));
+              }
+            };
+            
+            websocket!.onmessage = (event) => {
+              try {
+                const message = JSON.parse(event.data);
+                handleRealtimeMessage(message);
+              } catch (e) {
+                console.error('Failed to parse WebSocket message:', e);
+              }
+            };
           });
         };
         
@@ -88,6 +247,9 @@ export async function setupRealtime() {
         isConnected = true;
         updateStatus('✅ Connected - Ready to talk!', false);
         updateButtons();
+        
+        // Show conversation container
+        conversationContainer.classList.remove('hidden');
         
         // Hide retry button on successful connection
         retryBtn.classList.add('hidden');
@@ -105,22 +267,22 @@ export async function setupRealtime() {
       } catch (e) {
         console.error('Connection failed - Full error details:', e);
         
-        // More specific error messages for WebRTC issues
+        // More specific error messages based on the actual error
         let errorMessage = 'Connection failed';
         if (e instanceof Error) {
           console.error('Error type:', e.constructor.name);
           console.error('Error message:', e.message);
           console.error('Error stack:', e.stack);
           
-          if (e.message.includes('setRemoteDescription') || e.message.includes('RTCPeerConnection')) {
-            errorMessage = 'WebRTC connection failed - Try refreshing the page';
-          } else if (e.message.includes('SessionDescription')) {
-            errorMessage = 'Invalid session description - Generate new key';
-          } else if (e.message.includes('API key')) {
-            errorMessage = 'Invalid API key - Generate new key';
+          if (e.message.includes('WebSocket') && e.message.includes('timeout')) {
+            errorMessage = 'Connection timeout - Ephemeral key may be expired';
+          } else if (e.message.includes('WebSocket') && e.message.includes('failed')) {
+            errorMessage = 'WebSocket connection failed - Check API key and network';
+          } else if (e.message.includes('closed unexpectedly')) {
+            errorMessage = 'Connection closed - Generate new ephemeral key';
           } else if (e.message.includes('network') || e.message.includes('fetch')) {
             errorMessage = 'Network error - Check internet connection';
-          } else if (e.message.includes('expired') || e.message.includes('timeout')) {
+          } else if (e.message.includes('timeout')) {
             errorMessage = 'Connection timeout - Try again';
           } else if (e.message.includes('Permission')) {
             errorMessage = 'Permission denied - Allow microphone access';
@@ -138,18 +300,20 @@ export async function setupRealtime() {
         
         // Suggest solutions
         console.log('🔧 Troubleshooting suggestions:');
-        console.log('1. Refresh the page and try again');
-        console.log('2. Check your internet connection');
-        console.log('3. Generate a new ephemeral key');
-        console.log('4. Try using a different browser (Chrome/Edge recommended)');
-        console.log('5. Allow microphone permissions');
+        console.log('1. Generate a fresh ephemeral key using RealTimeGptTest.py');
+        console.log('2. Set a valid OPENAI_API_KEY environment variable');
+        console.log('3. Ensure you have access to OpenAI Realtime API');
+        console.log('4. Check your internet connection');
+        console.log('5. Try using a different browser (Chrome/Edge recommended)');
+        console.log('6. Allow microphone permissions when prompted');
       }
     } else {
       // Disconnect
-      if (session) {
+      if (websocket) {
         try {
-          // Close the session gracefully
-          session = null;
+          // Close the WebSocket connection gracefully
+          websocket.close(1000, 'User disconnected');
+          websocket = null;
         } catch (e) {
           console.error('Disconnect error:', e);
         }
@@ -164,6 +328,9 @@ export async function setupRealtime() {
       isConnected = false;
       updateStatus('Disconnected', false);
       updateButtons();
+      
+      // Hide conversation container
+      conversationContainer.classList.add('hidden');
     }
   });
 
@@ -197,12 +364,13 @@ export async function setupRealtime() {
 
   // Retry connection functionality
   retryBtn.addEventListener('click', async () => {
-    // Reset session
-    if (session) {
+    // Reset websocket
+    if (websocket) {
       try {
-        session = null;
+        websocket.close();
+        websocket = null;
       } catch (e) {
-        console.error('Error resetting session:', e);
+        console.error('Error resetting websocket:', e);
       }
     }
     
@@ -355,6 +523,12 @@ export async function setupRealtime() {
       stopMicrophoneTest();
       micPopup.classList.add('hidden');
     }
+  });
+
+  // Clear conversation button
+  clearConversationBtn.addEventListener('click', () => {
+    conversationMessages.innerHTML = '';
+    addMessageToConversation('ai', '대화 기록이 지워졌습니다.');
   });
 
   // Initialize button states

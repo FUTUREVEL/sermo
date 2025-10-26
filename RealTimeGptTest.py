@@ -52,6 +52,30 @@ try:
         with open('ephemeral_key.json', 'w') as f:
             json.dump(result, f, indent=2)
         print("\n💾 Key saved to ephemeral_key.json")
+        
+        # Auto-update the TypeScript file
+        try:
+            import re
+            file_path = 'src/realtime.ts'
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Find and replace the old ephemeral key
+            pattern = r"const apiKey = '[^']+'"
+            replacement = f"const apiKey = '{ephemeral_key}'"
+            
+            updated_content = re.sub(pattern, replacement, content)
+            
+            if updated_content != content:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(updated_content)
+                print(f"✅ Auto-updated {file_path} with new ephemeral key")
+            else:
+                print("⚠️ Could not find API key pattern in TypeScript file")
+                
+        except Exception as e:
+            print(f"⚠️ Could not auto-update TypeScript file: {e}")
+            print(f"📝 Please manually copy this key to src/realtime.ts: {ephemeral_key}")
     else:
         print(f"\n❌ Error: {response.status_code}")
         print(response.text)

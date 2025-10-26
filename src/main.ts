@@ -8,7 +8,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <a href="https://vite.dev" target="_blank">
       <img src="${viteLogo}" class="logo" alt="Vite logo" />
     </a>
-    <a href="https://www.typescriptlang.org/" target="_blank">
+    <a href="https://www.typescriptlang.org/" targew~t="_blank">
       <img src="${typescriptLogo}" class="logo vanilla" alt="TypeScript logo" />
     </a>
     <h1>OpenAI Realtime Chat</h1>
@@ -21,6 +21,21 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <button id="mic-btn" type="button" class="btn mic-btn mic-on" disabled>🎤 Mic On</button>
         <button id="mic-test-btn" type="button" class="btn mic-test">🎤 Test Mic</button>
         <button id="retry-btn" type="button" class="btn retry hidden">🔄 Retry Connection</button>
+      </div>
+      
+      <!-- 대화창 추가 -->
+      <div id="conversation-container" class="conversation-container hidden">
+        <div class="conversation-header">
+          <h3>💬 실시간 대화</h3>
+          <button id="clear-conversation" class="btn clear-btn">🗑️ 지우기</button>
+        </div>
+        <div id="conversation-messages" class="conversation-messages">
+          <!-- 메시지들이 여기에 추가됩니다 -->
+        </div>
+        <div class="conversation-status">
+          <div id="user-speaking" class="speaking-indicator hidden">🗣️ 사용자 말하는 중...</div>
+          <div id="ai-speaking" class="speaking-indicator hidden">🤖 AI 말하는 중...</div>
+        </div>
       </div>
       
       <div class="instructions">
